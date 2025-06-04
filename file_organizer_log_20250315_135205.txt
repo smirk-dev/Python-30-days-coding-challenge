@@ -1,0 +1,92 @@
+File Organization Log - 2025-03-15 13:52:05
+Directory: C:/Users/surya/OneDrive/Desktop/suryansh/python/day 1-30
+Categories:
+- Images: .jpg, .jpeg, .png, .gif, .bmp, .tiff, .webp
+- Documents: .pdf, .doc, .docx, .txt, .rtf, .odt, .xls, .xlsx, .ppt, .pptx
+- Videos: .mp4, .mov, .avi, .mkv, .wmv, .flv, .webm
+- Audio: .mp3, .wav, .ogg, .flac, .aac, .wma
+- Archives: .zip, .rar, .7z, .tar, .gz
+- Code: .py, .java, .html, .css, .js, .cpp, .c, .php, .json, .xml
+
+Moved Files:
+- background.jpg -> Images/background.jpg
+- background.mp3 -> Audio/background.mp3
+- background.png -> Images/background.png
+- background_music.mp3 -> Audio/background_music.mp3
+- bird.png -> Images/bird.png
+- bullet.png -> Images/bullet.png
+- click.wav -> Audio/click.wav
+- credentials.txt -> Documents/credentials.txt
+- day1(helloworldascii).py -> Code/day1(helloworldascii).py
+- day10(primenumber).py -> Code/day10(primenumber).py
+- day11(stonepaperscissors).py -> Code/day11(stonepaperscissors).py
+- day12(mazerunnergame).py -> Code/day12(mazerunnergame).py
+- day13(todolist).py -> Code/day13(todolist).py
+- day14(planets).py -> Code/day14(planets).py
+- day14.2(atoms).py -> Code/day14.2(atoms).py
+- day15(2dshootinggame).py -> Code/day15(2dshootinggame).py
+- day16(weatherapp).py -> Code/day16(weatherapp).py
+- day17(tictactoegame).py -> Code/day17(tictactoegame).py
+- day18(sortingvisualizer).py -> Code/day18(sortingvisualizer).py
+- day19(hisaab).py -> Code/day19(hisaab).py
+- day2(temperaturemenu).py -> Code/day2(temperaturemenu).py
+- day20(PAV).py -> Code/day20(PAV).py
+- day21(2048).py -> Code/day21(2048).py
+- day22(breakoutgame).py -> Code/day22(breakoutgame).py
+- day23(minesweeper).py -> Code/day23(minesweeper).py
+- day24(chess).py -> Code/day24(chess).py
+- day25(spaceinvaders).py -> Code/day25(spaceinvaders).py
+- day26(platformergame).py -> Code/day26(platformergame).py
+- day27(musicplayer).py -> Code/day27(musicplayer).py
+- day28(fileorganizer).py -> Code/day28(fileorganizer).py
+- day29(flappybird).py -> Code/day29(flappybird).py
+- day3(calculator).py -> Code/day3(calculator).py
+- day4(completecalculatorapp).py -> Code/day4(completecalculatorapp).py
+- day5(simpleinterestcalculator).py -> Code/day5(simpleinterestcalculator).py
+- day6(factorialfinder).py -> Code/day6(factorialfinder).py
+- day7(fibonacciseries).py -> Code/day7(fibonacciseries).py
+- day8(guessthenumbergame).py -> Code/day8(guessthenumbergame).py
+- day9(palindromchecker).py -> Code/day9(palindromchecker).py
+- draw.wav -> Audio/draw.wav
+- enemy1.png -> Images/enemy1.png
+- enemy2.png -> Images/enemy2.png
+- enemy3.png -> Images/enemy3.png
+- expenses.db -> Other/expenses.db
+- explosion1.png -> Images/explosion1.png
+- explosion2.png -> Images/explosion2.png
+- explosion3.png -> Images/explosion3.png
+- fail.wav -> Audio/fail.wav
+- flap.wav -> Audio/flap.wav
+- highscore.txt -> Documents/highscore.txt
+- highscores.txt -> Documents/highscores.txt
+- high_score.txt -> Documents/high_score.txt
+- high_scores.txt -> Documents/high_scores.txt
+- hit.wav -> Audio/hit.wav
+- last_runtime.txt -> Documents/last_runtime.txt
+- lose.wav -> Audio/lose.wav
+- mine.png -> Images/mine.png
+- move.wav -> Audio/move.wav
+- move_sound.wav -> Audio/move_sound.wav
+- paper.png -> Images/paper.png
+- pipe.png -> Images/pipe.png
+- player.png -> Images/player.png
+- player_image.png -> Images/player_image.png
+- point.wav -> Audio/point.wav
+- powerup.png -> Images/powerup.png
+- rock.png -> Images/rock.png
+- scissors.png -> Images/scissors.png
+- scores.txt -> Documents/scores.txt
+- search_icon.png -> Images/search_icon.png
+- shield.png -> Images/shield.png
+- shoot.wav -> Audio/shoot.wav
+- success.wav -> Audio/success.wav
+- target.png -> Images/target.png
+- tasks.db -> Other/tasks.db
+- tasks.txt -> Documents/tasks.txt
+- tempCodeRunnerFile.python -> Other/tempCodeRunnerFile.python
+- win.wav -> Audio/win.wav
+- win_sound.wav -> Audio/win_sound.wav
+
+Summary:
+- Files processed: 77
+- Files moved: 77

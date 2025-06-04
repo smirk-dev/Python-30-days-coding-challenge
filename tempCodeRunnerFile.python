@@ -1,0 +1,1128 @@
+import sys
+import os
+import time
+from PyQt5.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QListWidget,
+    QFileDialog,
+    QLabel,
+    QSlider,
+    QStyle,
+    QFrame,
+    QListWidgetItem,
+    QProgressBar,
+    QMenu,
+    QAction,
+    QInputDialog,
+    QLineEdit,
+    QMessageBox,
+    QShortcut,
+)
+from PyQt5.QtCore import Qt, QUrl, QTimer, QSize, QEvent, QMimeData
+from PyQt5.QtGui import QIcon, QColor, QPalette, QFont, QPixmap, QDrag, QKeySequence
+import pygame
+import random
+import threading
+import json
+
+
+class CircularButton(QPushButton):
+    def __init__(self, icon=None, size=50, color="#1DB954", parent=None):
+        super().__init__(parent)
+        self.setFixedSize(size, size)
+        if icon:
+            self.setIcon(icon)
+            self.setIconSize(QSize(size * 0.56, size * 0.56))
+        
+        self.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {color};
+                border-radius: {size//2}px;
+                color: white;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background-color: {self._lighten_color(color)};
+            }}
+            QPushButton:pressed {{
+                background-color: {self._darken_color(color)};
+            }}
+            """
+        )
+    
+    def _lighten_color(self, hex_color):
+        # Simple function to lighten a hex color
+        r = min(int(hex_color[1:3], 16) + 20, 255)
+        g = min(int(hex_color[3:5], 16) + 20, 255)
+        b = min(int(hex_color[5:7], 16) + 20, 255)
+        return f"#{r:02x}{g:02x}{b:02x}"
+    
+    def _darken_color(self, hex_color):
+        # Simple function to darken a hex color
+        r = max(int(hex_color[1:3], 16) - 20, 0)
+        g = max(int(hex_color[3:5], 16) - 20, 0)
+        b = max(int(hex_color[5:7], 16) - 20, 0)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+
+class PlaylistItem(QListWidgetItem):
+    def __init__(self, text, filepath, parent=None):
+        super().__init__(text, parent)
+        self.filepath = filepath
+        self.setForeground(QColor("#FFFFFF"))
+
+
+class DraggableListWidget(QListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragDropMode(QListWidget.InternalMove)
+        self.setAcceptDrops(True)
+        self.setDefaultDropAction(Qt.MoveAction)
+    
+    def dropEvent(self, event):
+        super().dropEvent(event)
+        self.parent().update_playlist_files_after_drop()
+
+
+class VolumeSlider(QSlider):
+    def __init__(self, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.setRange(0, 100)
+        self.setValue(70)  # Default volume
+        self.setFixedWidth(80)
+        self.setStyleSheet("""
+            QSlider::groove:horizontal {
+                background: #535353;
+                height: 3px;
+                border-radius: 1px;
+            }
+            QSlider::handle:horizontal {
+                background: #1DB954;
+                width: 10px;
+                height: 10px;
+                margin: -4px 0;
+                border-radius: 5px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #1DB954;
+            }
+        """)
+
+
+class MusicPlayer(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        # Initialize pygame mixer for audio playback
+        pygame.mixer.init()
+        
+        # Set app icon
+        self.setWindowIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+
+        # Set up the main window
+        self.setWindowTitle("Enhanced Music Player")
+        self.setGeometry(300, 300, 550, 650)
+        self.setup_ui()
+        
+        # Initialize variables
+        self.playlist_files = []
+        self.current_index = -1
+        self.playing = False
+        self.timer = QTimer(self)
+        self.timer.setInterval(1000)  # Update time every second
+        self.timer.timeout.connect(self.update_time)
+        self.paused_position = 0
+        self.song_length = 0
+        self.shuffle_mode = False
+        self.repeat_mode = 0  # 0: No repeat, 1: Repeat playlist, 2: Repeat single
+        self.settings_file = os.path.join(os.path.expanduser("~"), ".music_player_settings.json")
+        
+        # Load settings and previous playlist
+        self.load_settings()
+        
+        # Setup keyboard shortcuts
+        self.setup_shortcuts()
+
+    def setup_ui(self):
+        # Apply dark theme
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background-color: #121212;
+            }
+            QLabel {
+                color: white;
+                font-family: 'Segoe UI', Arial, sans-serif;
+            }
+            QSlider::groove:horizontal {
+                background: #535353;
+                height: 4px;
+                border-radius: 2px;
+            }
+            QSlider::handle:horizontal {
+                background: #1DB954;
+                width: 12px;
+                height: 12px;
+                margin: -4px 0;
+                border-radius: 6px;
+            }
+            QSlider::add-page:horizontal {
+                background: #535353;
+            }
+            QSlider::sub-page:horizontal {
+                background: #1DB954;
+            }
+            QListWidget {
+                background-color: #181818;
+                border: none;
+                border-radius: 8px;
+                padding: 5px;
+                color: white;
+                outline: none;
+            }
+            QListWidget::item {
+                height: 40px;
+                padding-left: 10px;
+                border-radius: 4px;
+            }
+            QListWidget::item:selected {
+                background-color: #333333;
+            }
+            QListWidget::item:hover {
+                background-color: #282828;
+            }
+            QPushButton {
+                background-color: #333333;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #444444;
+            }
+            QPushButton:pressed {
+                background-color: #555555;
+            }
+            QMenu {
+                background-color: #282828;
+                color: white;
+                border: 1px solid #333333;
+            }
+            QMenu::item {
+                padding: 5px 20px 5px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #1DB954;
+            }
+            QMessageBox {
+                background-color: #282828;
+                color: white;
+            }
+            QMessageBox QLabel {
+                color: white;
+            }
+            QMessageBox QPushButton {
+                min-width: 80px;
+            }
+            """
+        )
+
+        # Main widget and layout
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
+        self.main_layout = QVBoxLayout()
+        self.main_layout.setContentsMargins(20, 20, 20, 20)
+        self.main_layout.setSpacing(15)
+        self.central_widget.setLayout(self.main_layout)
+
+        # Now Playing section
+        self.now_playing_frame = QFrame()
+        self.now_playing_frame.setStyleSheet(
+            """
+            QFrame {
+                background-color: #181818;
+                border-radius: 10px;
+                padding: 15px;
+            }
+            """
+        )
+        self.setup_now_playing_section()
+        self.main_layout.addWidget(self.now_playing_frame)
+
+        # Playlist section
+        self.playlist_frame = QFrame()
+        self.playlist_frame.setStyleSheet(
+            """
+            QFrame {
+                background-color: #181818;
+                border-radius: 10px;
+                padding: 10px;
+            }
+            """
+        )
+        self.setup_playlist_section()
+        self.main_layout.addWidget(self.playlist_frame)
+
+        # Set layout proportions
+        self.main_layout.setStretch(0, 1)  # Now playing section
+        self.main_layout.setStretch(1, 2)  # Playlist section
+
+    def setup_now_playing_section(self):
+        self.now_playing_layout = QVBoxLayout(self.now_playing_frame)
+        self.now_playing_layout.setContentsMargins(15, 15, 15, 15)
+
+        # Now Playing header
+        header_layout = QHBoxLayout()
+        self.now_playing_header = QLabel("NOW PLAYING")
+        self.now_playing_header.setStyleSheet(
+            """
+            font-size: 12px;
+            color: #B3B3B3;
+            font-weight: bold;
+            """
+        )
+        header_layout.addWidget(self.now_playing_header)
+        header_layout.addStretch()
+        
+        # Volume control
+        volume_layout = QHBoxLayout()
+        volume_icon = QLabel()
+        volume_icon.setPixmap(self.style().standardIcon(QStyle.SP_MediaVolume).pixmap(16, 16))
+        volume_layout.addWidget(volume_icon)
+        
+        self.volume_slider = VolumeSlider()
+        self.volume_slider.valueChanged.connect(self.set_volume)
+        volume_layout.addWidget(self.volume_slider)
+        
+        header_layout.addLayout(volume_layout)
+        self.now_playing_layout.addLayout(header_layout)
+
+        # Currently playing song label
+        self.current_song_label = QLabel("No song playing")
+        self.current_song_label.setAlignment(Qt.AlignCenter)
+        self.current_song_label.setStyleSheet(
+            """
+            font-size: 18px;
+            font-weight: bold;
+            margin: 10px 0;
+            """
+        )
+        self.now_playing_layout.addWidget(self.current_song_label)
+
+        # Time slider
+        self.time_slider = QSlider(Qt.Horizontal)
+        self.time_slider.setEnabled(False)
+        self.time_slider.sliderMoved.connect(self.slider_moved)
+        self.time_slider.sliderReleased.connect(self.set_position)
+        self.time_slider.setFixedHeight(20)
+        self.now_playing_layout.addWidget(self.time_slider)
+
+        # Time display
+        self.time_layout = QHBoxLayout()
+        self.current_time = QLabel("0:00")
+        self.current_time.setStyleSheet("color: #B3B3B3; font-size: 12px;")
+        self.total_time = QLabel("0:00")
+        self.total_time.setStyleSheet("color: #B3B3B3; font-size: 12px;")
+        self.time_layout.addWidget(self.current_time)
+        self.time_layout.addStretch()
+        self.time_layout.addWidget(self.total_time)
+        self.now_playing_layout.addLayout(self.time_layout)
+
+        # Control buttons
+        self.controls_layout = QHBoxLayout()
+        self.controls_layout.setSpacing(15)
+
+        # Shuffle button
+        self.shuffle_button = CircularButton(size=40, color="#333333")
+        self.shuffle_button.setIcon(self.style().standardIcon(QStyle.SP_MediaShuffle))
+        self.shuffle_button.setIconSize(QSize(20, 20))
+        self.shuffle_button.clicked.connect(self.toggle_shuffle)
+        
+        # Previous button
+        self.prev_button = CircularButton(size=40, color="#333333")
+        self.prev_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipBackward))
+        self.prev_button.setIconSize(QSize(20, 20))
+        self.prev_button.clicked.connect(self.prev_song)
+
+        # Play button (larger)
+        self.play_button = CircularButton(
+            self.style().standardIcon(QStyle.SP_MediaPlay),
+            size=50,
+            color="#1DB954"
+        )
+        self.play_button.clicked.connect(self.play_pause)
+
+        # Stop button
+        self.stop_button = CircularButton(size=40, color="#333333")
+        self.stop_button.setIcon(self.style().standardIcon(QStyle.SP_MediaStop))
+        self.stop_button.setIconSize(QSize(20, 20))
+        self.stop_button.clicked.connect(self.stop)
+
+        # Next button
+        self.next_button = CircularButton(size=40, color="#333333")
+        self.next_button.setIcon(self.style().standardIcon(QStyle.SP_MediaSkipForward))
+        self.next_button.setIconSize(QSize(20, 20))
+        self.next_button.clicked.connect(self.next_song)
+        
+        # Repeat button
+        self.repeat_button = CircularButton(size=40, color="#333333")
+        self.repeat_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        self.repeat_button.setIconSize(QSize(20, 20))
+        self.repeat_button.clicked.connect(self.toggle_repeat)
+
+        # Add buttons to layout
+        self.controls_layout.addStretch()
+        self.controls_layout.addWidget(self.shuffle_button)
+        self.controls_layout.addWidget(self.prev_button)
+        self.controls_layout.addWidget(self.play_button)
+        self.controls_layout.addWidget(self.stop_button)
+        self.controls_layout.addWidget(self.next_button)
+        self.controls_layout.addWidget(self.repeat_button)
+        self.controls_layout.addStretch()
+
+        self.now_playing_layout.addLayout(self.controls_layout)
+
+    def setup_playlist_section(self):
+        self.playlist_layout = QVBoxLayout(self.playlist_frame)
+        self.playlist_layout.setContentsMargins(15, 15, 15, 15)
+
+        # Playlist header with search
+        header_layout = QHBoxLayout()
+        self.playlist_header = QLabel("PLAYLIST")
+        self.playlist_header.setStyleSheet(
+            """
+            font-size: 12px;
+            color: #B3B3B3;
+            font-weight: bold;
+            """
+        )
+        header_layout.addWidget(self.playlist_header)
+        header_layout.addStretch()
+        
+        # Search box
+        # Search box
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Search playlist...")
+        self.search_box.setStyleSheet("""
+            QLineEdit {
+                background-color: #333333;
+                color: white;
+                border-radius: 4px;
+                padding: 4px 8px;
+                margin-left: 10px;
+            }
+        """)
+        self.search_box.textChanged.connect(self.filter_playlist)
+        self.search_box.setFixedWidth(200)
+        header_layout.addWidget(self.search_box)
+        
+        self.playlist_layout.addLayout(header_layout)
+
+        # Playlist
+        self.playlist = DraggableListWidget(self)
+        self.playlist.setSelectionMode(QListWidget.ExtendedSelection)
+        self.playlist.doubleClicked.connect(self.playlist_double_clicked)
+        self.playlist.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.playlist.customContextMenuRequested.connect(self.show_playlist_context_menu)
+        self.playlist_layout.addWidget(self.playlist)
+
+        # Playlist control buttons
+        self.playlist_controls = QHBoxLayout()
+        self.playlist_controls.setSpacing(10)
+
+        self.add_button = QPushButton("Add Songs")
+        self.add_button.setIcon(self.style().standardIcon(QStyle.SP_DialogOpenButton))
+        self.add_button.clicked.connect(self.add_songs)
+
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setIcon(self.style().standardIcon(QStyle.SP_DialogDiscardButton))
+        self.remove_button.clicked.connect(self.remove_selected)
+        
+        self.clear_button = QPushButton("Clear All")
+        self.clear_button.setIcon(self.style().standardIcon(QStyle.SP_DialogResetButton))
+        self.clear_button.clicked.connect(self.clear_playlist)
+        
+        self.save_button = QPushButton("Save Playlist")
+        self.save_button.setIcon(self.style().standardIcon(QStyle.SP_DialogSaveButton))
+        self.save_button.clicked.connect(self.save_playlist)
+
+        self.playlist_controls.addWidget(self.add_button)
+        self.playlist_controls.addWidget(self.remove_button)
+        self.playlist_controls.addWidget(self.clear_button)
+        self.playlist_controls.addWidget(self.save_button)
+
+        self.playlist_layout.addLayout(self.playlist_controls)
+
+    def setup_shortcuts(self):
+        # Play/Pause - Space
+        self.shortcut_play = QShortcut(QKeySequence(Qt.Key_Space), self)
+        self.shortcut_play.activated.connect(self.play_pause)
+        
+        # Stop - Escape
+        self.shortcut_stop = QShortcut(QKeySequence(Qt.Key_Escape), self)
+        self.shortcut_stop.activated.connect(self.stop)
+        
+        # Next - Right arrow
+        self.shortcut_next = QShortcut(QKeySequence(Qt.Key_Right), self)
+        self.shortcut_next.activated.connect(self.next_song)
+        
+        # Previous - Left arrow
+        self.shortcut_prev = QShortcut(QKeySequence(Qt.Key_Left), self)
+        self.shortcut_prev.activated.connect(self.prev_song)
+        
+        # Volume Up - Up arrow
+        self.shortcut_vol_up = QShortcut(QKeySequence(Qt.Key_Up), self)
+        self.shortcut_vol_up.activated.connect(self.volume_up)
+        
+        # Volume Down - Down arrow
+        self.shortcut_vol_down = QShortcut(QKeySequence(Qt.Key_Down), self)
+        self.shortcut_vol_down.activated.connect(self.volume_down)
+        
+        # Delete - Delete key
+        self.shortcut_delete = QShortcut(QKeySequence(Qt.Key_Delete), self)
+        self.shortcut_delete.activated.connect(self.remove_selected)
+
+    def add_songs(self):
+        files, _ = QFileDialog.getOpenFileNames(
+            self, "Add Songs", "", "Audio Files (*.mp3 *.wav *.ogg)"
+        )
+
+        if not files:
+            return
+
+        for file in files:
+            filename = os.path.basename(file)
+            item = PlaylistItem(filename, file)
+            self.playlist.addItem(item)
+            self.playlist_files.append(file)
+            
+        self.save_playlist_to_settings()
+
+    def remove_selected(self):
+        selected_items = self.playlist.selectedItems()
+        if not selected_items:
+            return
+
+        # Collect indexes to remove
+        indexes = [self.playlist.row(item) for item in selected_items]
+        indexes.sort(reverse=True)  # Remove from end to start to avoid index shifting
+
+        for index in indexes:
+            self.playlist.takeItem(index)
+            self.playlist_files.pop(index)
+
+            # Adjust current_index if needed
+            if index < self.current_index:
+                self.current_index -= 1
+            elif index == self.current_index:
+                self.stop()
+                self.current_index = -1
+                
+        self.save_playlist_to_settings()
+
+    def clear_playlist(self):
+        if self.playlist.count() == 0:
+            return
+            
+        confirm = QMessageBox.question(
+            self, "Clear Playlist", 
+            "Are you sure you want to clear the entire playlist?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if confirm == QMessageBox.Yes:
+            self.stop()
+            self.playlist.clear()
+            self.playlist_files.clear()
+            self.current_index = -1
+            self.current_song_label.setText("No song playing")
+            self.save_playlist_to_settings()
+
+    def save_playlist(self):
+        if not self.playlist_files:
+            QMessageBox.information(self, "Save Playlist", "The playlist is empty.")
+            return
+            
+        playlist_name, ok = QInputDialog.getText(
+            self, "Save Playlist", "Enter playlist name:", 
+            QLineEdit.Normal, "My Playlist"
+        )
+        
+        if ok and playlist_name:
+            filename, _ = QFileDialog.getSaveFileName(
+                self, "Save Playlist", 
+                os.path.join(os.path.expanduser("~"), playlist_name), 
+                "M3U Playlists (*.m3u)"
+            )
+            
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write("#EXTM3U\n")
+                    for file_path in self.playlist_files:
+                        f.write(f"{file_path}\n")
+                QMessageBox.information(self, "Save Playlist", f"Playlist saved to {filename}")
+
+    def load_playlist(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Load Playlist", 
+            os.path.expanduser("~"), 
+            "M3U Playlists (*.m3u)"
+        )
+        
+        if filename:
+            self.stop()
+            self.playlist.clear()
+            self.playlist_files.clear()
+            
+            with open(filename, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    if os.path.exists(line):
+                        file_path = line
+                        file_name = os.path.basename(file_path)
+                        item = PlaylistItem(file_name, file_path)
+                        self.playlist.addItem(item)
+                        self.playlist_files.append(file_path)
+            
+            self.save_playlist_to_settings()
+            QMessageBox.information(self, "Load Playlist", f"Playlist loaded from {filename}")
+
+    def playlist_double_clicked(self):
+        selected_row = self.playlist.currentRow()
+        if selected_row >= 0:
+            self.current_index = selected_row
+            self.play_song()
+
+    def show_playlist_context_menu(self, position):
+        menu = QMenu()
+        play_action = menu.addAction("Play")
+        menu.addSeparator()
+        remove_action = menu.addAction("Remove")
+        menu.addSeparator()
+        move_up_action = menu.addAction("Move Up")
+        move_down_action = menu.addAction("Move Down")
+        menu.addSeparator()
+        properties_action = menu.addAction("Properties")
+        
+        # Only enable actions if an item is selected
+        has_selection = len(self.playlist.selectedItems()) > 0
+        play_action.setEnabled(has_selection)
+        remove_action.setEnabled(has_selection)
+        move_up_action.setEnabled(has_selection)
+        move_down_action.setEnabled(has_selection)
+        properties_action.setEnabled(has_selection)
+        
+        action = menu.exec_(self.playlist.mapToGlobal(position))
+        
+        if action == play_action:
+            self.playlist_double_clicked()
+        elif action == remove_action:
+            self.remove_selected()
+        elif action == move_up_action:
+            self.move_selected_up()
+        elif action == move_down_action:
+            self.move_selected_down()
+        elif action == properties_action:
+            self.show_properties()
+
+    def move_selected_up(self):
+        current_row = self.playlist.currentRow()
+        if current_row > 0:
+            # Get the item
+            item = self.playlist.takeItem(current_row)
+            item_path = self.playlist_files.pop(current_row)
+            
+            # Reinsert at new position
+            self.playlist.insertItem(current_row - 1, item)
+            self.playlist_files.insert(current_row - 1, item_path)
+            
+            # Update selection
+            self.playlist.setCurrentRow(current_row - 1)
+            
+            # Adjust current_index if affected
+            if current_row == self.current_index:
+                self.current_index -= 1
+            elif current_row - 1 == self.current_index:
+                self.current_index += 1
+                
+            self.save_playlist_to_settings()
+
+    def move_selected_down(self):
+        current_row = self.playlist.currentRow()
+        if 0 <= current_row < self.playlist.count() - 1:
+            # Get the item
+            item = self.playlist.takeItem(current_row)
+            item_path = self.playlist_files.pop(current_row)
+            
+            # Reinsert at new position
+            self.playlist.insertItem(current_row + 1, item)
+            self.playlist_files.insert(current_row + 1, item_path)
+            
+            # Update selection
+            self.playlist.setCurrentRow(current_row + 1)
+            
+            # Adjust current_index if affected
+            if current_row == self.current_index:
+                self.current_index += 1
+            elif current_row + 1 == self.current_index:
+                self.current_index -= 1
+                
+            self.save_playlist_to_settings()
+
+    def show_properties(self):
+        selected_row = self.playlist.currentRow()
+        if selected_row >= 0:
+            file_path = self.playlist_files[selected_row]
+            file_name = os.path.basename(file_path)
+            file_size = os.path.getsize(file_path) / (1024 * 1024)  # Convert to MB
+            
+            # Try to get audio info
+            try:
+                sound = pygame.mixer.Sound(file_path)
+                duration = sound.get_length()
+                minutes = int(duration // 60)
+                seconds = int(duration % 60)
+                duration_str = f"{minutes}:{seconds:02d}"
+            except:
+                duration_str = "Unknown"
+            
+            info = f"File: {file_name}\n"
+            info += f"Path: {file_path}\n"
+            info += f"Size: {file_size:.2f} MB\n"
+            info += f"Duration: {duration_str}"
+            
+            QMessageBox.information(self, "File Properties", info)
+
+    def update_playlist_files_after_drop(self):
+        # Rebuild playlist_files from current playlist items
+        self.playlist_files = []
+        for i in range(self.playlist.count()):
+            item = self.playlist.item(i)
+            self.playlist_files.append(item.filepath)
+        
+        # Try to update current_index
+        if self.current_index >= 0:
+            current_item = None
+            for i in range(self.playlist.count()):
+                if self.playlist.item(i).text() == self.current_song_label.text():
+                    self.current_index = i
+                    break
+        
+        self.save_playlist_to_settings()
+
+    def filter_playlist(self):
+        search_text = self.search_box.text().lower()
+        
+        # Show all items if search is empty
+        if not search_text:
+            for i in range(self.playlist.count()):
+                self.playlist.item(i).setHidden(False)
+            return
+        
+        # Hide items that don't match
+        for i in range(self.playlist.count()):
+            item = self.playlist.item(i)
+            if search_text in item.text().lower():
+                item.setHidden(False)
+            else:
+                item.setHidden(True)
+
+    def play_pause(self):
+        if not self.playlist_files:
+            return
+
+        if self.playing:
+            # Pause
+            pygame.mixer.music.pause()
+            self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+            self.playing = False
+            self.timer.stop()
+            self.paused_position = pygame.mixer.music.get_pos() / 1000
+        else:
+            # Play
+            if self.current_index == -1:
+                # No song was playing before, start the first one
+                self.current_index = 0
+                self.play_song()
+            else:
+                # Resume paused song
+                pygame.mixer.music.unpause()
+                self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+                self.playing = True
+                self.timer.start()
+
+    def play_song(self):
+        if 0 <= self.current_index < len(self.playlist_files):
+            # Stop current playback if any
+            if pygame.mixer.music.get_busy():
+                pygame.mixer.music.stop()
+
+            # Load and play new song
+            song_path = self.playlist_files[self.current_index]
+            try:
+                pygame.mixer.music.load(song_path)
+                pygame.mixer.music.play()
+                pygame.mixer.music.set_volume(self.volume_slider.value() / 100)
+            except pygame.error as e:
+                QMessageBox.warning(self, "Playback Error", 
+                                     f"Could not play {os.path.basename(song_path)}: {str(e)}")
+                self.next_song()
+                return
+
+            # Update UI
+            self.playlist.setCurrentRow(self.current_index)
+            song_name = os.path.basename(song_path)
+            self.current_song_label.setText(song_name)
+            self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPause))
+            self.playing = True
+
+            # Get song length and set slider maximum
+        # Get song length and set slider maximum
+            try:
+                    sound = pygame.mixer.Sound(song_path)
+                    self.song_length = sound.get_length()
+                    self.time_slider.setEnabled(True)
+                    self.time_slider.setRange(0, int(self.song_length))
+                    minutes = int(self.song_length // 60)
+                    seconds = int(self.song_length % 60)
+                    self.total_time.setText(f"{minutes}:{seconds:02d}")
+            except:
+                    self.song_length = 0
+                    self.time_slider.setEnabled(False)
+                    self.total_time.setText("0:00")
+
+            # Start timer to update slider
+            self.timer.start()
+            
+            # Update window title with current song
+            self.setWindowTitle(f"{song_name} - Enhanced Music Player")
+
+    def stop(self):
+        if pygame.mixer.music.get_busy():
+            pygame.mixer.music.stop()
+        self.play_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        self.playing = False
+        self.current_time.setText("0:00")
+        self.time_slider.setValue(0)
+        self.time_slider.setEnabled(False)
+        self.timer.stop()
+        self.setWindowTitle("Enhanced Music Player")
+
+    def next_song(self):
+        if not self.playlist_files:
+            return
+
+        if self.shuffle_mode:
+            # Random selection (avoid current song)
+            if len(self.playlist_files) > 1:
+                next_indices = list(range(len(self.playlist_files)))
+                next_indices.remove(self.current_index)
+                self.current_index = random.choice(next_indices)
+            else:
+                self.current_index = 0
+        else:
+            # Normal sequential play
+            self.current_index = (self.current_index + 1) % len(self.playlist_files)
+        
+        self.play_song()
+
+    def prev_song(self):
+        if not self.playlist_files:
+            return
+
+        # If we're more than 3 seconds into the song, restart it instead of going to previous
+        if self.playing and pygame.mixer.music.get_pos() > 3000:
+            pygame.mixer.music.play()
+            return
+            
+        if self.shuffle_mode:
+            # Random selection (avoid current song)
+            if len(self.playlist_files) > 1:
+                prev_indices = list(range(len(self.playlist_files)))
+                prev_indices.remove(self.current_index)
+                self.current_index = random.choice(prev_indices)
+            else:
+                self.current_index = 0
+        else:
+            # Normal sequential play
+            self.current_index = (self.current_index - 1) % len(self.playlist_files)
+        
+        self.play_song()
+
+    def update_time(self):
+        if not self.playing:
+            return
+
+        # Check if song ended
+        if not pygame.mixer.music.get_busy():
+            if self.repeat_mode == 2:  # Repeat single
+                pygame.mixer.music.play()
+            elif self.repeat_mode == 1 or self.current_index < len(self.playlist_files) - 1:  # Repeat all or not at end
+                self.next_song()
+            else:  # No repeat and at end
+                self.stop()
+            return
+
+        # Update slider position
+        current_pos = pygame.mixer.music.get_pos() / 1000  # Convert ms to seconds
+        if current_pos < 0:  # This can happen right after loading a song
+            current_pos = 0
+            
+        self.time_slider.setValue(int(current_pos))
+
+        # Update time label
+        minutes = int(current_pos // 60)
+        seconds = int(current_pos % 60)
+        self.current_time.setText(f"{minutes}:{seconds:02d}")
+
+    def slider_moved(self, position):
+        # Update time display while dragging
+        minutes = int(position // 60)
+        seconds = int(position % 60)
+        self.current_time.setText(f"{minutes}:{seconds:02d}")
+
+    def set_position(self):
+        if not self.playing or self.song_length <= 0:
+            return
+            
+        position = self.time_slider.value()
+        
+        # Need to restart the song and skip to position
+        current_song = self.playlist_files[self.current_index]
+        pygame.mixer.music.stop()
+        pygame.mixer.music.load(current_song)
+        pygame.mixer.music.play()
+        pygame.mixer.music.set_pos(position)
+
+    def set_volume(self, value):
+        pygame.mixer.music.set_volume(value / 100)
+
+    def volume_up(self):
+        current_volume = self.volume_slider.value()
+        new_volume = min(current_volume + 5, 100)
+        self.volume_slider.setValue(new_volume)
+
+    def volume_down(self):
+        current_volume = self.volume_slider.value()
+        new_volume = max(current_volume - 5, 0)
+        self.volume_slider.setValue(new_volume)
+
+    def toggle_shuffle(self):
+        self.shuffle_mode = not self.shuffle_mode
+        if self.shuffle_mode:
+            self.shuffle_button.setStyleSheet(
+                """
+                QPushButton {
+                    background-color: #1DB954;
+                    border-radius: 20px;
+                    color: white;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #1ED760;
+                }
+                """
+            )
+        else:
+            self.shuffle_button.setStyleSheet(
+                """
+                QPushButton {
+                    background-color: #333333;
+                    border-radius: 20px;
+                    color: white;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #444444;
+                }
+                """
+            )
+        self.save_settings()
+
+    def toggle_repeat(self):
+        # Cycle through: no repeat -> repeat all -> repeat one
+        self.repeat_mode = (self.repeat_mode + 1) % 3
+        
+        if self.repeat_mode == 0:  # No repeat
+            self.repeat_button.setStyleSheet(
+                """
+                QPushButton {
+                    background-color: #333333;
+                    border-radius: 20px;
+                    color: white;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #444444;
+                }
+                """
+            )
+            self.repeat_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        elif self.repeat_mode == 1:  # Repeat all
+            self.repeat_button.setStyleSheet(
+                """
+                QPushButton {
+                    background-color: #1DB954;
+                    border-radius: 20px;
+                    color: white;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #1ED760;
+                }
+                """
+            )
+            self.repeat_button.setIcon(self.style().standardIcon(QStyle.SP_BrowserReload))
+        else:  # Repeat one
+            self.repeat_button.setStyleSheet(
+                """
+                QPushButton {
+                    background-color: #1DB954;
+                    border-radius: 20px;
+                    color: white;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #1ED760;
+                }
+                """
+            )
+            self.repeat_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+        
+        self.save_settings()
+
+    def save_settings(self):
+        settings = {
+            'volume': self.volume_slider.value(),
+            'shuffle': self.shuffle_mode,
+            'repeat': self.repeat_mode,
+            'window_geometry': {
+                'x': self.geometry().x(),
+                'y': self.geometry().y(),
+                'width': self.geometry().width(),
+                'height': self.geometry().height()
+            }
+        }
+        
+        try:
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+
+    def save_playlist_to_settings(self):
+        settings = {}
+        try:
+            with open(self.settings_file, 'r') as f:
+                settings = json.load(f)
+        except:
+            settings = {}
+            
+        settings['playlist'] = self.playlist_files
+        
+        try:
+            with open(self.settings_file, 'w') as f:
+                json.dump(settings, f)
+        except Exception as e:
+            print(f"Error saving playlist: {e}")
+
+    def load_settings(self):
+        try:
+            with open(self.settings_file, 'r') as f:
+                settings = json.load(f)
+                
+            # Apply volume setting
+            if 'volume' in settings:
+                self.volume_slider.setValue(settings['volume'])
+                pygame.mixer.music.set_volume(settings['volume'] / 100)
+                
+            # Apply shuffle setting
+            if 'shuffle' in settings:
+                self.shuffle_mode = settings['shuffle']
+                if self.shuffle_mode:
+                    self.shuffle_button.setStyleSheet(
+                        """
+                        QPushButton {
+                            background-color: #1DB954;
+                            border-radius: 20px;
+                            color: white;
+                            border: none;
+                        }
+                        QPushButton:hover {
+                            background-color: #1ED760;
+                        }
+                        """
+                    )
+                    
+            # Apply repeat setting
+            if 'repeat' in settings:
+                self.repeat_mode = settings['repeat']
+                if self.repeat_mode == 1:  # Repeat all
+                    self.repeat_button.setStyleSheet(
+                        """
+                        QPushButton {
+                            background-color: #1DB954;
+                            border-radius: 20px;
+                            color: white;
+                            border: none;
+                        }
+                        QPushButton:hover {
+                            background-color: #1ED760;
+                        }
+                        """
+                    )
+                elif self.repeat_mode == 2:  # Repeat one
+                    self.repeat_button.setStyleSheet(
+                        """
+                        QPushButton {
+                            background-color: #1DB954;
+                            border-radius: 20px;
+                            color: white;
+                            border: none;
+                        }
+                        QPushButton:hover {
+                            background-color: #1ED760;
+                        }
+                        """
+                    )
+                    self.repeat_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+                    
+            # Apply window geometry
+            if 'window_geometry' in settings:
+                geo = settings['window_geometry']
+                self.setGeometry(geo['x'], geo['y'], geo['width'], geo['height'])
+                
+            # Load saved playlist
+            if 'playlist' in settings:
+                for file_path in settings['playlist']:
+                    if os.path.exists(file_path):
+                        file_name = os.path.basename(file_path)
+                        item = PlaylistItem(file_name, file_path)
+                        self.playlist.addItem(item)
+                        self.playlist_files.append(file_path)
+                        
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+
+    def closeEvent(self, event):
+        self.save_settings()
+        pygame.mixer.quit()
+        event.accept()
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    player = MusicPlayer()
+    player.show()
+    sys.exit(app.exec_())
